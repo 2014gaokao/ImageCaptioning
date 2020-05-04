@@ -1,4 +1,4 @@
-# Implementation for paper 'Attention on Attention for Image Captioning'
+# Modification based on paper 'Attention on Attention for Image Captioning'
 # https://arxiv.org/abs/1908.06954
 
 from __future__ import absolute_import
@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import misc.utils as utils
+import math
+import numpy as np
 
 from .AttModel import pack_wrapper, AttModel, Attention
 from .TransformerModel import LayerNorm, attention, clones, SublayerConnection, PositionwiseFeedForward
@@ -18,28 +20,28 @@ class MultiHeadedDotAttention(nn.Module):
         super(MultiHeadedDotAttention, self).__init__()
         assert d_model * scale % h == 0
         # We assume d_v always equals d_k
-        self.d_k = d_model * scale // h  #128?
-        self.h = h  #8
+        self.d_k = d_model * scale // h
+        self.h = h
 
         # Do we need to do linear projections on K and V?
-        self.project_k_v = project_k_v  #1
+        self.project_k_v = project_k_v
 
         # normalize the query?
         if norm_q:
             self.norm = LayerNorm(d_model)
         else:
             self.norm = lambda x:x
-        self.linears = clones(nn.Linear(d_model, d_model * scale), 1 + 2 * project_k_v)  #3个线性层
+        self.linears = clones(nn.Linear(d_model, d_model * scale), 1 + 2 * project_k_v)
 
         # output linear layer after the multi-head attention?
         self.output_layer = nn.Linear(d_model * scale, d_model)
 
         # apply aoa after attention?
-        self.use_aoa = do_aoa  #1
+        self.use_aoa = do_aoa
         if self.use_aoa:
             self.aoa_layer =  nn.Sequential(nn.Linear((1 + scale) * d_model, 2 * d_model), nn.GLU())
             # dropout to the input of AoA layer
-            if dropout_aoa > 0:  #0.3
+            if dropout_aoa > 0:
                 self.dropout_aoa = nn.Dropout(p=dropout_aoa)
             else:
                 self.dropout_aoa = lambda x:x
@@ -51,6 +53,12 @@ class MultiHeadedDotAttention(nn.Module):
 
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
+
+        self.m = 40
+        self.d_v = 128
+        if self.project_k_v == 1:
+            self.m_k = nn.Parameter(torch.FloatTensor(1, 40, h * 128))
+            self.m_v = nn.Parameter(torch.FloatTensor(1, 40, h * 128))
         
     def forward(self, query, value, key, mask=None):
         if mask is not None:
@@ -70,17 +78,39 @@ class MultiHeadedDotAttention(nn.Module):
 
         # Do all the linear projections in batch from d_model => h x d_k 
         if self.project_k_v == 0:
+            # concentrated attention through explicit selection
             query_ =  self.linears[0](query).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
             key_ = key.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
             value_ = value.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-        else:
-            query_, key_, value_ = \
-                [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-                            for l, x in zip(self.linears, (query, key, value))]
 
-        # Apply attention on all the projected vectors in batch. 
-        x, self.attn = attention(query_, key_, value_, mask=mask, 
-                            dropout=self.dropout)
+            scores = torch.matmul(query_, key_.transpose(-2, -1)) \
+                     / math.sqrt(self.d_k)
+            if (scores.size()[-1] > 64):
+                v, _ = torch.topk(scores, 64)
+                vk = v[:, :, :, -1].unsqueeze(3).expand_as(scores)
+                mask_k = torch.lt(scores, vk)
+                scores = scores.masked_fill(mask_k, -1e18)
+            else:
+                if mask is not None:
+                    scores = scores.masked_fill(mask == 0, -1e9)
+            p_attn = F.softmax(scores, dim=-1)
+            if self.dropout is not None:
+                p_attn = self.dropout(p_attn)
+            x = torch.matmul(p_attn, value_)
+        else:
+            # extend with persistent memory vectors
+            b_s, nq = query.shape[:2]
+            nk = key.shape[1]
+            m_k = np.sqrt(self.d_k) * self.m_k.expand(b_s, self.m, self.h * self.d_k)
+            m_v = np.sqrt(self.m) * self.m_v.expand(b_s, self.m, self.h * self.d_v)
+            query_ = self.linears[0](query).view(b_s, nq, self.h, self.d_k).permute(0, 2, 1, 3)
+            key_ = torch.cat([self.linears[1](key), m_k], 1).view(b_s, nk + self.m, self.h, self.d_k).permute(0, 2, 3, 1)
+            value_ = torch.cat([self.linears[2](value), m_v], 1).view(b_s, nk + self.m, self.h, self.d_v).permute(0, 2, 1, 3)
+
+            att = torch.matmul(query_, key_) / np.sqrt(self.d_k)
+            att[:, :, :, :nk] = att[:, :, :, :nk].masked_fill(mask == 0, -np.inf)
+            att = F.softmax(att, -1)
+            x = torch.matmul(att, value_)
 
         # "Concat" using a view
         x = x.transpose(1, 2).contiguous() \
@@ -97,7 +127,7 @@ class MultiHeadedDotAttention(nn.Module):
         return x
 
 class AoA_Refiner_Layer(nn.Module):
-    def __init__(self, size, self_attn, feed_forward, dropout):  #1024, self_attn, feed_forword=0, dropout=0.1
+    def __init__(self, size, self_attn, feed_forward, dropout):
         super(AoA_Refiner_Layer, self).__init__()
         self.self_attn = self_attn
         self.feed_forward = feed_forward
@@ -165,7 +195,6 @@ class AoA_Decoder_Core(nn.Module):
 
         if self.use_multi_head == 2:
             att = self.attention(h_att, p_att_feats.narrow(2, 0, self.multi_head_scale * self.d_model), p_att_feats.narrow(2, self.multi_head_scale * self.d_model, self.multi_head_scale * self.d_model), att_masks)
-            #self.ctx2att outputs a vector of size 2*rnn_size, where one half is for K and the other half is for V
         else:
             att = self.attention(h_att, att_feats, p_att_feats, att_masks)
 
@@ -202,11 +231,6 @@ class AoAModel(AttModel):
         else:
             self.refiner = lambda x,y : x
         self.core = AoA_Decoder_Core(opt)
-#In the encoder, in self-attention, Q, K, V are all projections of A, the feature vectors.
-#In the decoder, Q is a projection of the decoder‘s’ hidden state; K, V are projections of A
-#cocobu_att contains A, cocobu_fc contains the mean pooling of A
-#coco_box contains the bounding boxes of A
-#先走captionmodel 的forward，然后是到attmodel的_forward或者_sample
 
 
     def _prepare_feature(self, fc_feats, att_feats, att_masks):

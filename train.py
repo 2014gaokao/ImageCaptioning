@@ -92,7 +92,7 @@ def train(opt):
     dp_lw_model.train()
 
     if opt.noamopt:
-        assert opt.caption_model in ['transformer','aoa','sparseTransformer'], 'noamopt can only work with transformer'
+        assert opt.caption_model in ['transformer','aoa'], 'noamopt can only work with transformer'
         optimizer = utils.get_std_opt(model, factor=opt.noamopt_factor, warmup=opt.noamopt_warmup)
         optimizer._step = iteration
     elif opt.reduce_on_plateau:
