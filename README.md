@@ -1,5 +1,5 @@
 # ImageCaptioning
-Modification based on AoANet
+Modification based on AoANet with higher CIDEr score
 
 ## Requirements
 * Python 3.6
