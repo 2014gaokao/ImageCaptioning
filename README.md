@@ -9,6 +9,19 @@ Modification based on AoANet with higher CIDEr score
 * coco-caption
 * tensorboardX
 
+## Model
+### Encoder
+[Augmenting Self-attention with Persistent Memory](https://arxiv.org/pdf/1907.01470.pdf)
+</br>
+
+<img src="https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/encoder.jpg" alt="图片替换文本" width="600" height="450"/>
+
+### Decoder
+[Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection](https://arxiv.org/pdf/1912.11637.pdf)
+</br>
+
+![image](https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/figure3.jpg)
+
 ## Training
 
 ### Prepare data
