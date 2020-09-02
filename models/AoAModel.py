@@ -85,14 +85,26 @@ class MultiHeadedDotAttention(nn.Module):
 
             scores = torch.matmul(query_, key_.transpose(-2, -1)) \
                      / math.sqrt(self.d_k)
-            if (scores.size()[-1] > 64):
-                v, _ = torch.topk(scores, 64)
-                vk = v[:, :, :, -1].unsqueeze(3).expand_as(scores)
-                mask_k = torch.lt(scores, vk)
-                scores = scores.masked_fill(mask_k, -1e18)
-            else:
-                if mask is not None:
-                    scores = scores.masked_fill(mask == 0, -1e9)
+            #if (scores.size()[-1] > 64):
+                #v, _ = torch.topk(scores, 64)
+                #vk = v[:, :, :, -1].unsqueeze(3).expand_as(scores)
+                #mask_k = torch.lt(scores, vk)
+                #scores = scores.masked_fill(mask_k, -1e18)
+            #else:
+                #if mask is not None:
+                    #scores = scores.masked_fill(mask == 0, -1e9)
+
+            if mask is not None:
+                scores = scores.masked_fill(mask == 0, -1e9)
+            split = torch.chunk(scores, math.floor(scores.shape[-1] / 4), -1)
+            concat = torch.mean(split[0], -1).view(scores.shape[0], scores.shape[1], -1, 1).expand_as(split[0])
+            for i in range(len(split)):
+                if i != 0:
+                    t = torch.mean(split[i], -1).view(scores.shape[0], scores.shape[1], -1, 1).expand_as(split[i])
+                    concat = torch.cat((concat, t), dim=-1)
+            scores[scores < concat * 0.8] = -1e9
+
+
             p_attn = F.softmax(scores, dim=-1)
             if self.dropout is not None:
                 p_attn = self.dropout(p_attn)
