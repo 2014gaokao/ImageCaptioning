@@ -10,13 +10,6 @@ Modification based on [AoANet](https://github.com/husthuaan/AoANet) with higher 
 * tensorboardX
 
 ## Model
-### Encoder
-[Augmenting Self-attention with Persistent Memory](https://arxiv.org/pdf/1907.01470.pdf)
-</br>
-
-<img src="https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/encoder.jpg" alt="图片替换文本" width="600" height="450"/>
-
-### Decoder
 </br>
 
 ![image](https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/sparse.jpg)
