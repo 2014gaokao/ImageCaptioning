@@ -17,10 +17,9 @@ Modification based on [AoANet](https://github.com/husthuaan/AoANet) with higher 
 <img src="https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/encoder.jpg" alt="图片替换文本" width="600" height="450"/>
 
 ### Decoder
-[Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection](https://arxiv.org/pdf/1912.11637.pdf)
 </br>
 
-![image](https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/figure3.jpg)
+![image](https://github.com/2014gaokao/ImageCaptioning/blob/master/vis/sparse.jpg)
 
 ## Training
 
